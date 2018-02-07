@@ -1,0 +1,524 @@
+---
+output: html_document
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo=FALSE, message=FALSE, warning=FALSE)
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+library(jsonlite)
+library(stringr)
+library(tidyr)
+library(dplyr)
+```
+
+```{r}
+integrum = readLines("~/stm_internet_regulation/integrum_net_regulation_2.json") %>% 
+  str_c(collapse = ",") %>%  #collapsing by comma into list objects
+  (function(str) str_c("[", str, "]")) %>% #uniting list objects into list
+  fromJSON(simplifyDataFrame = T) #convert into R object
+ 
+df = as.data.frame(unlist(integrum)) #converting into data frame
+library(data.table)
+setDT(df, keep.rownames = TRUE)[] #taking row names as a separate column
+df$rn <- str_replace(df$rn, "[0-9]+", "") #removing digits in row names
+library(tidyr)
+colnames(df)[2] <- "values"
+df$values <- as.character(df$values) #converting column with values into character 
+```
+
+```{r}
+df1 <- df %>%
+   group_by(rn) %>% #grouping by names from first column
+   mutate(ind = row_number()) %>% #creating id
+   spread(rn, values) #making data frame with column names from first column
+#write.csv(df1, file="~/media.csv", row.names=F)
+```
+
+```{r}
+#data cleaning for high text
+df1$high_text <- str_replace_all(df1$high_text, "\n", " ")
+df1$high_text <- str_replace_all(df1$high_text, "\r", " ")
+df1$high_text <- str_replace_all(df1$high_text, "\\\\n", " ")
+df1$high_text <- str_replace_all(df1$high_text, "[:punct:]", " ")
+df1$high_text <- str_replace_all(df1$high_text, "[0-9]+", " ")
+df1$high_text <- tolower(df1$high_text)
+df1$high_text <- str_replace_all(df1$high_text, "[a-z]", " ")
+df1$high_text <- str_replace_all(df1$high_text, "\\s+", " ") #deleting extra spaces (last)
+
+high_text <- df1 %>% select(high_text) #making new dataset for lemmatizing via mystem
+#write.csv(high_text, file="~/high_text.csv", row.names=F)
+#write.csv(df1, file="~/media_tidy.csv", row.names=F)
+```
+
+```{r}
+#reading lemmatized text which was lemmatized on desktop version of mystem
+library(readr)
+tolem_lem <- read_csv("~/stm_internet_regulation/tolem.lem.csv")
+```
+
+```{r}
+#attaching lemmatized text to the main dataset
+df1 <- left_join(df1, tolem_lem, by="ind")
+```
+
+ 
+```{r}
+#Deleting Ukranian publishing house "Обозреватель"
+#Uncertain name "Экономическая газета"
+#Twins: 
+#Недвижимость & цены / Недвижимость и цены
+#Деловой вторник / Новый вторник
+df1 <- df1 %>% filter(source != "Обозреватель")
+```
+
+
+```{r}
+#reading file with names of countries
+countries = read.table("~/stm_internet_regulation/name_contrs.txt", 
+               sep="\t", 
+               col.names=c("name"), 
+               fill=FALSE, 
+               strip.white=TRUE)
+```
+
+```{r}
+#making names of countries lower case and adding spaces before and after every name
+countries$name <- tolower(countries$name)
+countries <- str_pad(countries$name, 40, "both")
+countries <- str_replace_all(countries, "\\s+", " ")
+```
+
+```{r}
+dt_contr <- select(df1, high_text.y, ind)
+
+#extracting countries from lemmatized texts
+for (country in countries) {
+  dt_contr[[country]] = str_count(dt_contr[[1]], country)
+}
+```
+
+```{r}
+#making dataframe with three columns where vlue is count of particular country in particular text, ind - id of the text, country - names of countries
+dt_gath <- dt_contr %>% gather(country, value, -ind) %>% na.omit() %>% arrange(ind)
+dt_gath$value <- as.numeric(dt_gath$value)
+dt_gath$ind <- as.character(dt_gath$ind)
+
+dt_gath <- dt_gath %>% dplyr::filter(country != "high_text.y", country!=" ес ", country!=" оон ", value>0)
+dt_gath$country[dt_gath$country == " беларусь "] <- " белоруссия "
+dt_gath$country[dt_gath$country == " великобритания "] <- " англия "
+```
+
+```{r}
+texts_countr_max <- dt_gath %>% group_by(country) %>% summarise(n = n()) %>% filter(n>120) %>% arrange(desc(n))
+texts_countr_max$country <- str_replace_all(texts_countr_max$country, "\\s+", "")
+
+texts_countr_max$country <- recode(texts_countr_max$country, "румыния" = "Romania", "болгария" = "Bulgaria", "эстония" = "Estonia", "венгрия" = "Hungary", "латвия"= "Latvia", "англия" = "UK", "греция" = "Greece", "польша" = "Poland", "италия" = "Italy", "испания"= "Spain","дания" = "Denmark", "австрия" = "Austria", "бельгия" = "Belgium", "швейцария" = "Switzerland", "нидерланды" = "Netherlands", "швеция" = "Sweden", "юар" = "South Africa", "бразилия" = "Brazil", "мексика" = "Mexico", "япония" = "Japan", "канада" = "Canada", "австралия" = "Australia", "корея" = "Korea", "финляндия" = "Finland", "кипр" = "Cyprus","нигерия" = "Nigeria", "венесуэла" = "Venezuela", "малайзия" = "Malaysia", "индонезия" = "Indonesia", "вьетнам" = "Vietnam", "афганистан" = "Afghanistan", "израиль" = "Israel", "турция" = "Turkey", "египет" = "Egypt", "тунис" = "Tunisia", "иран" = "Iran", "сирия" = "Syria","ирак"=  "Iraq","пакистан" = "Pakistan", "казахстан" = "Kazakhstan", "великобритания" = "UK", "украина" = "Ukraine", "сша" = "USA", "россия" = "Russia", "китай" = "China", "грузия" = "Georgia", "таджикистан" = "Tajikistan", "киргизия" = "Kyrgyzstan")
+```
+
+```{r}
+library(ggplot2)
+ggplot(data=texts_countr_max, aes(x=reorder(as.factor(country), -n), y=n))+geom_bar(stat="identity", fill="#4169E1", alpha=0.5)+theme_bw()+xlab("Country")+ylab("Number of documents")+ggtitle("Distribution of countries in country oriented texts\n(>120 documents)")+coord_flip()+ theme(text=element_text(family="Times New Roman", size=12), legend.position="bottom", panel.grid.major = element_blank(), panel.grid.minor = element_blank(),panel.border = element_blank(), axis.line = element_line(colour = "black"))+  geom_text(aes(x=country, y=n, ymax=n, label=n, hjust=ifelse(sign(n)>0, 1, 0)), size = 2)
+```
+
+```{r}
+library(igraph) #library for creating networks
+
+med_drug <- as.data.frame(dt_gath) #making data frame class from dt_gath
+med_drug <- med_drug %>% dplyr::select(ind, country) #selecting columns to get text-country dataset
+med_drug$country <- str_replace_all(med_drug$country, "\\s+", "")
+med_drug$country <- recode(med_drug$country, "румыния" = "Romania", "болгария" = "Bulgaria", "эстония" = "Estonia", "венгрия" = "Hungary", "латвия"= "Latvia", "англия" = "UK", "греция" = "Greece", "польша" = "Poland", "италия" = "Italy", "испания"= "Spain","дания" = "Denmark", "австрия" = "Austria", "бельгия" = "Belgium", "швейцария" = "Switzerland", "нидерланды" = "Netherlands", "швеция" = "Sweden", "юар" = "South Africa", "бразилия" = "Brazil", "мексика" = "Mexico", "япония" = "Japan", "канада" = "Canada", "австралия" = "Australia", "корея" = "Korea", "финляндия" = "Finland", "кипр" = "Cyprus","нигерия" = "Nigeria", "венесуэла" = "Venezuela", "малайзия" = "Malaysia", "индонезия" = "Indonesia", "вьетнам" = "Vietnam", "афганистан" = "Afghanistan", "израиль" = "Israel", "турция" = "Turkey", "египет" = "Egypt", "тунис" = "Tunisia", "иран" = "Iran", "сирия" = "Syria","ирак"=  "Iraq","пакистан" = "Pakistan", "казахстан" = "Kazakhstan", "великобритания" = "UK", "украина" = "Ukraine", "сша" = "USA", "россия" = "Russia", "китай" = "China", "грузия" = "Georgia", "таджикистан" = "Tajikistan", "киргизия" = "Kyrgyzstan")
+
+#making graph object from data frame
+pc <- graph_from_data_frame(med_drug, directed = F)
+#plot(pc)
+#https://stackoverflow.com/questions/44687623/bipartite-graph-projection-error-igraph-rstudio
+
+#creating bipartite graph
+V(pc)$type <- FALSE
+V(pc)$type[V(pc)$name %in% med_drug[, 1]] <- TRUE
+
+is.bipartite(pc)
+
+one_mode_networks <- bipartite_projection(pc)
+
+#getting projection
+symt_graph <- one_mode_networks$proj1
+```
+
+
+```{r}
+#deleting verticles with degree less than 100
+sgdf.copy <- delete.vertices(symt_graph, 
+            V(symt_graph)[ degree(symt_graph) < 100] )
+
+#applying fastgreedy algorithm
+fastgreedy <- fastgreedy.community(sgdf.copy)
+eb <- edge.betweenness(sgdf.copy)
+l <- layout.auto(sgdf.copy)
+med <- colorRampPalette(c("#228B22", "#7B68EE", "#B22222"))
+colors <- med(max(membership(fastgreedy)))
+colors_frame <- med(max(membership(fastgreedy)))
+```
+
+```{r}
+#png(filename="TNR_net_countr.png",width=2560, height=1600) #saving plots, add vertex.label.cex = 3
+#plotting the network
+set.seed(1)
+plot(sgdf.copy, vertex.label.cex = 0.75, vertex.label.color="black", vertex.size=degree(sgdf.copy)/10, vertex.color=colors[membership(fastgreedy)], vertex.frame.color=colors_frame[membership(fastgreedy)], edge.width=eb/20, layout=l)
+#dev.off()
+```
+
+```{r}
+#plotting the tree
+set.seed(1)
+ceb <- cluster_fast_greedy(sgdf.copy) 
+#png(filename="TNR_dend_countr.png",width=1280, height=780) #add cex=2
+par(mar=c(5, 6, 4, 1), cex=0.75, family="Times")
+dendPlot(ceb, mode="hclust", colbar=c("#7B68EE", "#B22222", "#228B22"))
+#dev.off()
+```
+
+```{r}
+library(dendextend) 
+library(heatmaply)
+library(RColorBrewer)
+library(Hmisc)
+
+ceb_dend <- as.dendrogram(ceb) %>% color_branches(k = 3, col=c("#7B68EE", "#B22222", "#228B22"))
+netm <- get.adjacency(sgdf.copy, attr="weight", sparse=F)
+
+res2 <- rcorr(as.matrix(netm))
+pvalue_cor <- as.matrix(res2$P)
+cor_countr <- graph.adjacency(adjmatrix = pvalue_cor, mode = "undirected", diag = F, weighted = TRUE)
+
+#plotting heatmap with dendrogram of countries
+heatmaply(cor(netm), margins = c(48, 48), Rowv = ceb_dend, Colv = ceb_dend,
+          colors = Greys, 
+          limits = c(0,1))
+```
+
+```{r}
+corrr_contr <- cor(netm) #getting correlation matrix
+
+cor_countr <- graph.adjacency(adjmatrix = corrr_contr, mode = "undirected", diag = F, weighted = TRUE)
+#applying fastgreedy algorithm
+fastgreedy1 <- fastgreedy.community(cor_countr)
+eb <- edge.betweenness(cor_countr)
+
+set.seed(345678)
+l <- layout.auto(cor_countr)
+med <- colorRampPalette(c("#008B8B", "#FFA500"))
+colors <- med(max(membership(fastgreedy1)))
+colors_frame <- med(max(membership(fastgreedy1)))
+```
+
+```{r}
+#plotting the network
+#png(filename="TNR_corr_net_countr.png",width=4500, height=4000) #add vertex.label.cex=8 and edge.width=eb/0.5
+V(cor_countr)$size <- 3*abs(rowSums(corrr_contr))
+par(family="Times")
+plot(cor_countr, vertex.label.cex = 0.75, vertex.label.color="black", vertex.size= 3*abs(rowSums(corrr_contr))/15, vertex.color=colors[membership(fastgreedy1)], vertex.frame.color=colors_frame[membership(fastgreedy1)], edge.width=eb/2, layout=l)
+#dev.off()
+```
+
+```{r}
+#png(filename="TNR_corr_dend_countr.png",width=1280, height=780) #add cex=2
+#plotting dendrogram for fastgreedy on countries correlations network
+ceb_pv <- cluster_fast_greedy(cor_countr)
+par(cex=0.75, mar=c(5, 6, 4, 1), family="Times")
+dendPlot(ceb_pv, mode="hclust", colbar=c("#008B8B", "#FFA500"))
+#dev.off()
+```
+
+```{r}
+#getting clusters from network of co-occuarances
+clusters_country <- as.data.frame(unlist(fastgreedy))
+library(data.table)
+setDT(clusters_country, keep.rownames = TRUE)[] #taking row names as a separate column
+clusters_country$rn <- str_replace(clusters_country$rn, "[0-9]+", "") #removing digits in row names
+library(tidyr)
+colnames(clusters_country)[2] <- "values"
+clusters_country$values <- as.character(clusters_country$values) #converting column with values into character 
+```
+
+```{r}
+clusters_country <- clusters_country %>%
+   group_by(rn) %>% #grouping by names from first column
+   mutate(ind = row_number()) %>% #creating id
+   spread(rn, values) #making data frame with column names from first column
+
+clusters_country <- clusters_country %>% select(membership, names) %>% na.omit()
+colnames(clusters_country)[2] <- "country"
+```
+
+```{r}
+#assign numbers of clusters for texts
+text_by_country <- dt_gath %>% group_by(ind) %>% slice(which.max(value))
+text_by_country$country <- str_replace_all(text_by_country$country, "\\s+", "")
+text_by_country$country <- recode(text_by_country$country, "румыния" = "Romania", "болгария" = "Bulgaria", "эстония" = "Estonia", "венгрия" = "Hungary", "латвия"= "Latvia", "англия" = "UK", "греция" = "Greece", "польша" = "Poland", "италия" = "Italy", "испания"= "Spain","дания" = "Denmark", "австрия" = "Austria", "бельгия" = "Belgium", "швейцария" = "Switzerland", "нидерланды" = "Netherlands", "швеция" = "Sweden", "юар" = "South Africa", "бразилия" = "Brazil", "мексика" = "Mexico", "япония" = "Japan", "канада" = "Canada", "австралия" = "Australia", "корея" = "Korea", "финляндия" = "Finland", "кипр" = "Cyprus","нигерия" = "Nigeria", "венесуэла" = "Venezuela", "малайзия" = "Malaysia", "индонезия" = "Indonesia", "вьетнам" = "Vietnam", "афганистан" = "Afghanistan", "израиль" = "Israel", "турция" = "Turkey", "египет" = "Egypt", "тунис" = "Tunisia", "иран" = "Iran", "сирия" = "Syria","ирак"=  "Iraq","пакистан" = "Pakistan", "казахстан" = "Kazakhstan", "великобритания" = "UK", "украина" = "Ukraine", "сша" = "USA", "россия" = "Russia", "китай" = "China", "грузия" = "Georgia", "таджикистан" = "Tajikistan", "киргизия" = "Kyrgyzstan")
+text_by_country <- left_join(text_by_country, clusters_country, by = "country")
+text_by_country$membership[is.na(text_by_country$membership)] <- 4 #cluster of texts which mention low degree countries
+  ```
+
+```{r}
+text_by_country$ind <- as.numeric(text_by_country$ind)
+texts_clusters <- left_join(df1, text_by_country, by = "ind")
+texts_clusters$membership[is.na(texts_clusters$membership)] <- 5 #cluster of texts which do not mention countries at all
+```
+
+```{r}
+text_by_country_freq <- texts_clusters %>% dplyr::group_by(country, membership) %>% count() %>% filter(country!="россия") 
+top_contr <- as.data.frame(texts_clusters) %>% select(country, membership, -ind) %>%  group_by(country, membership) %>% count()  %>%  arrange(desc(n)) %>% na.omit() %>% head(11)%>% filter(country!="Russia")
+topc <- c(top_contr$country)
+cols <- c("2" = "#228B22", "1" = "#7B68EE", "3" = "#B22222", "4" = "#DAA520")
+           
+
+#png(filename="TNR_distr_countr_texts.png",width=1350, height=780) #size=25 and size=5
+ggplot(data=top_contr, aes(x=reorder(as.factor(country), -n), y=n, fill=top_contr$membership))+
+  geom_bar(stat="identity", alpha=0.7)+theme_bw()+
+  xlab("Country")+
+  ylab("Number of documents")+
+  ggtitle("Distribution of countries in country oriented texts\nwith a percentage of the number of texts about Russia")+
+  coord_flip()+
+  scale_fill_manual(values=cols, name="Membership", labels = c("Developing countries\n(including countries of\nthe Arab spring)", " \nDeveloped countries\n ", " \nCore countries\n ")) + 
+  geom_text(aes(x=country, y=round((n/3368)*100, 1), label=paste(round((n/3368)*100, 1), "%", ""), hjust=ifelse(sign(round((n/3368)*100, 1))>0, 0, 0)), position = position_dodge(width=1), size = 1) + 
+  theme(text=element_text(family="Times New Roman", size=12, color="black"), panel.grid.major = element_blank(), panel.grid.minor = element_blank(),panel.border = element_blank(), axis.line = element_line(colour = "black"))
+#dev.off()
+```
+   
+```{r}
+library(stm)
+texts_clusters <- as.data.frame(texts_clusters)
+texts_clusters <- texts_clusters %>% select(ind, high_text.y, membership)
+library(readr)
+texts_clusters$membership <- as.factor(as.character(texts_clusters$membership))
+
+library(tm)
+#deleting stopwords
+stopslova <- c(stopwords("ru"), "который", "этот", "что", "быть", "для", "весь", "как", "при", "свой", "только", "год")
+stopslova <- str_pad(stopslova, 40, "both")
+stopslova <- str_replace_all(stopslova, "\\s+", " ")
+
+for (slovo in stopslova) {
+  texts_clusters[[2]] = str_replace_all(texts_clusters[[2]], slovo, "")
+}
+
+#text processing
+#processed <- textProcessor(texts_clusters$high_text.y, metadata = texts_clusters, stem=F, removestopwords = TRUE, language = "ru")
+#out <- prepDocuments(processed$documents, processed$vocab, processed$meta)
+#docs <- out$documents
+#vocab <- out$vocab
+#meta  <-out$meta 
+
+#save(processed, file="~/stm_internet_regulation/processed.RData")
+#save(out, file="~/stm_internet_regulation/out.RData")
+
+load(processed, file="~/stm_internet_regulation/processed.RData")
+load(out, file="~/stm_internet_regulation/out.RData")
+docs <- out$documents
+vocab <- out$vocab
+meta  <-out$meta 
+
+#STM model
+#set.seed(1) 
+#poliblogPrevFit <- stm(documents = out$documents, vocab = out$vocab,
+#                        K = 50, prevalence =~ membership,
+#                        max.em.its = 200, data = out$meta,
+#                        init.type = "Spectral") #83 iterations
+
+#save(poliblogPrevFit, file='~/poliblogPrevFit.rda')
+#save(poliblogPrevFit, file='~/poliblogPrevFit.RData')
+
+#loading finished model
+load('~/stm_internet_regulation/poliblogPrevFit.RData')
+#poliblogPrevFit$convergence
+```
+
+
+```{r}
+#getting top words for topics
+labelTopics(poliblogPrevFit)
+prep <- estimateEffect(1:50 ~ membership , poliblogPrevFit,  meta = out$meta, uncertainty = "Global")
+```
+
+
+```{r}
+#proportion of topics in texts
+topicNames <- c("changes in editorial positions", "congresses and exhibitions", "Orthodoxy", "website-blocking", "relations with Egypt", "censorship in China", "internet trading", "import substitution", "gambling business", "state and law", "social network sites", "Internet for children", "large companies", "business information management", "president elections", "relations with Ukraine and Turkey", "political opposition online", "ban on the distant sale of alcohol", "extremism", "prohibition of Telegram", "cybersecurity and USA", "television programs", "modernization of info-spheres", "Dayton agreements", "new Internet rules for individuals", "telemedicine", "cadastral regulation", "political regime and ideology", "WikiLeaks", "antivirus software", "automation of the banking system", "pricing for utilities", "agriculture", "Moscow renovation program", "international trade law", "crypto-currency mining in Russia", "criminal prosecution", "casino", "introduction of Internet banks", "federal civil law", "criminal case", "piracy", "Kinotavr", "ban on tobacco advertising", "relations with China", "Unified Domain Name Registry", "legal regulation", "Telecom Ministry", "finance", "anti-piracy law")
+fift <- c(1:50)
+names(topicNames) <- fift
+#png(filename="TNR_top_topics.png",width=4000, height=3800) #cex=5
+#plotting top topics
+par(bty="n",col="black",lwd=3, family="Times")
+plot.STM(poliblogPrevFit,type="summary",custom.labels="",topic.names=topicNames, frame.plot = FALSE)
+#dev.off()
+```
+
+
+
+```{r}
+#Graphical display of topical prevalence contrast
+plot(prep,covariate = "membership",topics = c(38)) #стр 19 https://cran.r-project.org/web/packages/stm/vignettes/stmVignette.pdf
+```
+
+```{r}
+#deleting removed while preprocessing texts from the main dataset
+rem <- as.data.frame(processed$docs.removed)
+colnames(rem)[1] <- "ind"
+texts_clusters$ind <- 1:nrow(texts_clusters)
+without_removed <- anti_join(texts_clusters, rem, by="ind")
+```
+
+```{r}
+#extracting main thought for particular topics
+thoughts3 <- findThoughts(poliblogPrevFit, texts = without_removed$high_text.y, n = 2, topics = 3)$docs[[1]]
+thoughts20 <- findThoughts(poliblogPrevFit, texts = without_removed$high_text.y, n = 2, topics = 20)$docs[[1]]
+thoughts <- as.data.frame(unlist(findThoughts(poliblogPrevFit, texts = without_removed$high_text.y, n = 2, topics=c(17,8))$docs))
+setDT(thoughts, keep.rownames = TRUE)[] #taking row names as a separate column
+thoughts$rn <- paste(thoughts$rn, " ")
+thoughts$rn <- str_replace(thoughts$rn, "\\d\\s+", "")
+colnames(thoughts)[2] <- "texts"
+thoughts$texts <- as.character(thoughts$texts)
+library(tidytext)
+thoughts <- thoughts %>%
+  unnest_tokens(word, texts)
+
+thoughts <- thoughts %>%
+  dplyr::count(word, rn, sort = TRUE) 
+library(reshape2)
+library(wordcloud)
+#plotting word cloud for two topics
+thoughts %>% acast(word ~ rn, value.var = "n", fill = 0) %>%
+  comparison.cloud(colors = c("#7FC97F", "#BEAED4"),
+                   max.words = 100)
+
+```
+
+```{r}
+plot.STM(poliblogPrevFit, type = "perspectives", topics = c(17, 4))
+```
+
+```{r}
+#getting positive topic correlations
+mod.out.corr <- topicCorr(poliblogPrevFit)
+adj_cor_topic <- mod.out.corr$posadj
+adj_cor_topic_cor <- mod.out.corr$cor
+
+#naming of row and columns of the matrix with topic names
+adj_cor_topic <- as.matrix.data.frame(adj_cor_topic)
+colnames(adj_cor_topic) <- paste("Topic", 1:50, sep=" ")
+rownames(adj_cor_topic) <- paste("Topic", 1:50, sep=" ")
+colnames(adj_cor_topic) <- topicNames
+rownames(adj_cor_topic) <- topicNames
+
+#getting igraph object from adjacency matrix
+cor_topics <- graph.adjacency(adjmatrix = adj_cor_topic, mode = "undirected", diag = F)
+
+#getting only connected nodes
+cor_topics <- delete.vertices(cor_topics, 
+            V(cor_topics)[ degree(cor_topics) < 1] )
+
+fastgreedy <- fastgreedy.community(cor_topics)
+
+l <- layout.auto(cor_topics)
+med <- colorRampPalette(c("#DAA520", "#008000", "#C71585",  "#FF6347", "#191970", "#DC143C",  "#008080", "#87CEFA", "#EE82EE", "#FF4500"))
+colors <- med(max(membership(fastgreedy)))
+colors_frame <- med(max(membership(fastgreedy)))
+```
+
+```{r}
+#png(filename="TNR_corr_topics.png",width=6000, height=3500) #vertex.label.cex = 4
+par(family="Times")
+plot(cor_topics, vertex.label.cex = 1, vertex.label.color="black", vertex.size=5, vertex.color=colors[membership(fastgreedy)], vertex.frame.color=colors_frame[membership(fastgreedy)], layout=l, vertex.label.dist=0.5)
+#dev.off()
+```
+
+```{r}
+set.seed(1)
+corrr <- cluster_fast_greedy(cor_topics) 
+dendPlot(corrr, mode="hclust", colbar=c("#DAA520", "#008000", "#C71585", "#FF6347", "#191970", "#DC143C",  "#008080", "#87CEFA", "#EE82EE", "#FF4500"))
+```
+
+
+```{r}
+#matcging texts with the most probable topics
+thetaDF <- as.data.frame(poliblogPrevFit$theta) 
+names(thetaDF) <- c(1:50)
+
+toptopics <- as.data.frame(cbind(document = row.names(thetaDF), 
+  topic = apply(thetaDF,1,function(x) names(thetaDF)[which(x==max(x))])))
+
+colnames(toptopics)[1] <- "ind"
+toptopics$ind <- as.numeric(toptopics$ind)
+toptopics_text <- left_join(toptopics, df1, by="ind") 
+toptopics_text <- select(toptopics_text, ind, topic, high_text.x)
+```
+
+
+```{r}
+library(lubridate)
+dt <- df1
+dt$date <- substr(dt$date, start = 1, stop = 10)
+dt$date <- dmy(dt$date)
+```
+
+```{r}
+dt$ind <- 1:nrow(dt)
+date_ind <- dt %>% select(ind, date)
+texts_clusters_date <- left_join(texts_clusters, date_ind, by="ind")
+without_removed_date <- anti_join(texts_clusters_date, rem, by="ind")
+toptopics_date <- left_join(toptopics, date_ind, by="ind")
+top10_date <- toptopics_date %>% filter(topic %in% c(4, 14, 31, 30, 6, 7, 44, 18, 13, 39))
+top3_date <- toptopics_date %>% filter(topic %in% c(4, 17))
+library(scales)
+types <- c("17" = "solid", "4" = "dotted")
+color <- c("black", "red")
+top3_date$topic <- ifelse(top3_date$topic == "4", "website-blocking", "political opposition online")
+```
+
+```{r}
+#plotting distribution of 4 and 17 topics over time
+#png(filename="TNR_4_17.png",width=1200, height=780) #size=12
+a <- ggplot(top3_date, aes(x = as.Date(date, format = "%Y")))
+a + geom_freqpoly(aes(color = topic, linetype = topic)) + 
+  scale_x_date(date_breaks = "1 year", date_labels = "%Y", limits = c(as.Date("2009-01-16", format="%Y"), as.Date("2017-07-28", format="%Y"))) +  
+  scale_color_manual(values = c("black", "red")) + 
+  theme_bw() +
+  labs(x = "Year", y = "Frequency") +
+  ggtitle("Topics occurrence over time") + 
+  theme(text=element_text(family="Times New Roman", size=12), legend.position="bottom", panel.grid.minor = element_blank(),panel.border = element_blank(), axis.line = element_line(colour = "black")) + 
+  scale_y_continuous(breaks = scales::pretty_breaks(n = 10))
+#dev.off()
+```
+
+```{r}
+#getting membership and topics per text in one data frame
+membership_topics <- left_join(toptopics, texts_clusters, by="ind")
+membership_topics <- membership_topics %>% select(ind, topic, membership)
+membership_topics <- membership_topics %>% group_by(topic, membership) %>% summarise(n=n())
+membership_topics$membership[is.na(membership_topics$membership)] <- "5"
+
+
+#scale_x_discrete(breaks = topc, labels = topicNames)
+library(cowplot)
+cols_top <- c("2" = "#228B22", "1" = "#7B68EE", "3" = "#B22222", "4" = "#DAA520", "5" = "grey40")
+```
+
+```{r}
+#png(filename="TNR_countr_texts.png",width=1350, height=980) #size=24
+ggplot(data=membership_topics, aes(x=reorder(as.factor(topic), -n), y=n, fill=membership))+
+  geom_bar(stat="identity", alpha=0.7)+
+  theme_minimal()+
+  xlab("Topic")+
+  ylab("Number of documents")+
+  ggtitle("Distribution of documents of particular topic\naccording to the country cluster of documents")+
+  scale_fill_manual(values=cols_top, name="Membership", labels = c("Developing countries\n(including countries of\nthe Arab spring)", " \nDeveloped countries\n ", " \nCore countries\n ", " \nCountries with low degree\n ", " \nNo countries mentions\n ")) + 
+  theme(text=element_text(family="Times New Roman", size=12), panel.grid.major = element_blank(), panel.grid.minor = element_blank(),panel.border = element_blank(), axis.line = element_line(colour = "black")) +
+  scale_x_discrete(labels = topicNames)+ 
+  coord_flip() 
+#dev.off()
+```
