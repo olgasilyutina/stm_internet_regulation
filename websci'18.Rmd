@@ -4,7 +4,13 @@ authors: "Anna Shirokanova & Olga Silyutina"
 conference: "WebSci'18"
 
 output:
-  github_document
+  html_document:
+    theme: cosmo
+    highlight: zenburn
+    df_print: paged
+    code_folding: show
+editor_options:
+  chunk_output_type: inline
 ---
 
 ```{r setup, include=FALSE}
