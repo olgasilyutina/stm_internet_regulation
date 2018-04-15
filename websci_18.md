@@ -646,8 +646,8 @@ col_est <- c("membership2" = "#228B22", "membership1" = "#7B68EE", "membership3"
 #png(filename="~/int_reg_rus/TNR_countr_effect1.png",width=1350, height=980) #size=24
 ggplot(estimated_effect3, aes(x=name, y=estimate, fill=membership)) + 
   geom_bar(stat="identity", alpha=0.7) + 
-  xlab("Estimate") + 
-  ylab("Topic") + 
+  ylab("Estimate") + 
+  xlab("Topic") + 
   ggtitle("Significant estimated effect of covariates on topics") +
   coord_flip() + scale_x_discrete(limits=myorder) + 
   scale_fill_manual(name="Membership", values=col_est, breaks=c("membership1", "membership2", "membership3", "membership4", "membership5"), labels = c("Developing countries\n(including countries of\nthe Arab spring)", " \nDeveloped countries\n ", " \nCore countries\n ", " \nCountries with low degree\n ", " \nNo countries mentions\n ")) +
