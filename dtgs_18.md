@@ -1,4 +1,4 @@
-dtgs'18
+Internet regulation: A text-based approach to media coverage
 ================
 
 Preparation
